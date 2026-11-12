@@ -5,7 +5,7 @@ import hashlib
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from typing import List
+from typing import List, Literal, Optional
 from openai import OpenAI
 
 app = FastAPI()
@@ -80,13 +80,18 @@ def init_db():
 
 init_db()
 
-def check_is_manager(user_id: str):
+def get_user_role(user_id: str) -> str:
     conn = sqlite3.connect("tasks.db")
     cursor = conn.cursor()
     cursor.execute("SELECT role FROM users WHERE user_id = ?", (user_id,))
     row = cursor.fetchone()
     conn.close()
-    if not row or row[0] != "Manager":
+    if not row:
+        raise HTTPException(status_code=403, detail="Permission denied: User not found.")
+    return row[0]
+
+def check_is_manager(user_id: str):
+    if get_user_role(user_id) != "Manager":
         raise HTTPException(status_code=403, detail="Permission denied: Only Managers can assign or delete tasks.")
 
 class LoginRequest(BaseModel):
@@ -101,17 +106,19 @@ class RegisterRequest(BaseModel):
 
 class TaskCreate(BaseModel):
     title: str
-    priority: str = "MEDIUM"
+    priority: Literal["LOW", "MEDIUM", "HIGH"] = "MEDIUM"
     userId: str         # Creator (Manager)
     assignedTo: str     # Assignee (Team Member)
 
 class TaskUpdate(BaseModel):
-    status: str
+    status: Optional[Literal["BACKLOG", "IN_PROGRESS", "IN_REVIEW", "DONE"]] = None
+    priority: Optional[Literal["LOW", "MEDIUM", "HIGH"]] = None
+    assignedTo: Optional[str] = None
+    userId: Optional[str] = None
 
 class AIBreakdownRequest(BaseModel):
     prompt: str
     userId: str
-    assignedTo: str
 
 @app.get("/api/users")
 def get_users():
@@ -163,7 +170,8 @@ def get_tasks():
     conn = sqlite3.connect("tasks.db")
     cursor = conn.cursor()
     cursor.execute("""
-        SELECT t.id, t.title, t.status, t.priority, t.user_id, COALESCE(u.name, t.assigned_to) 
+        SELECT t.id, t.title, t.status, t.priority, t.user_id, t.assigned_to,
+               COALESCE(u.name, t.assigned_to)
         FROM tasks t
         LEFT JOIN users u ON t.assigned_to = u.user_id
     """)
@@ -175,7 +183,8 @@ def get_tasks():
         "status": r[2], 
         "priority": r[3], 
         "userId": r[4], 
-        "assignedTo": r[5] or "Unassigned"
+        "assignedToId": r[5],
+        "assignedTo": r[6] or "Unassigned"
     } for r in rows]
 
 @app.post("/api/tasks")
@@ -192,14 +201,57 @@ async def create_task(task: TaskCreate):
     return {"id": task_id, "title": task.title, "status": "BACKLOG", "priority": task.priority, "userId": task.userId, "assignedTo": task.assignedTo}
 
 @app.put("/api/tasks/{task_id}")
-async def update_task_status(task_id: int, task: TaskUpdate):
+async def update_task(task_id: int, task: TaskUpdate):
+    updates = []
+    if task.status is not None:
+        updates.append(("status", task.status))
+    if task.priority is not None:
+        updates.append(("priority", task.priority))
+    if task.assignedTo is not None:
+        updates.append(("assigned_to", task.assignedTo))
+    if not updates:
+        raise HTTPException(status_code=400, detail="At least one task field must be provided.")
+
+    if not task.userId:
+        raise HTTPException(status_code=400, detail="UserId is required to update a task.")
+    actor_role = get_user_role(task.userId)
+    if (task.priority is not None or task.assignedTo is not None) and actor_role != "Manager":
+        raise HTTPException(status_code=403, detail="Only Managers can change task priority or assignee.")
+
     conn = sqlite3.connect("tasks.db")
     cursor = conn.cursor()
-    cursor.execute("UPDATE tasks SET status = ? WHERE id = ?", (task.status, task_id))
+    cursor.execute("SELECT assigned_to FROM tasks WHERE id = ?", (task_id,))
+    task_row = cursor.fetchone()
+    if not task_row:
+        conn.close()
+        raise HTTPException(status_code=404, detail="Task not found.")
+    if task.status is not None and actor_role != "Manager" and task_row[0] != task.userId:
+        conn.close()
+        raise HTTPException(status_code=403, detail="You can update the status only of tasks assigned to you.")
+
+    if task.assignedTo is not None:
+        cursor.execute("SELECT user_id FROM users WHERE user_id = ?", (task.assignedTo,))
+        if not cursor.fetchone():
+            conn.close()
+            raise HTTPException(status_code=400, detail="Selected assignee does not exist.")
+
+    set_clause = ", ".join(f"{column} = ?" for column, _ in updates)
+    cursor.execute(
+        f"UPDATE tasks SET {set_clause} WHERE id = ?",
+        [value for _, value in updates] + [task_id]
+    )
+    if cursor.rowcount == 0:
+        conn.close()
+        raise HTTPException(status_code=404, detail="Task not found.")
     conn.commit()
     conn.close()
     await manager.broadcast("tasks_updated")
-    return {"id": task_id, "status": task.status}
+    return {
+        "id": task_id,
+        "status": task.status,
+        "priority": task.priority,
+        "assignedTo": task.assignedTo
+    }
 
 @app.delete("/api/tasks/{task_id}")
 async def delete_task(task_id: int, userId: str):
@@ -242,9 +294,14 @@ async def ai_breakdown(req: AIBreakdownRequest):
 
     conn = sqlite3.connect("tasks.db")
     cursor = conn.cursor()
-    for title in subtasks:
+    cursor.execute("SELECT user_id FROM users WHERE role != 'Manager' ORDER BY user_id")
+    assignees = [row[0] for row in cursor.fetchall()]
+    if not assignees:
+        assignees = [req.userId]
+
+    for index, title in enumerate(subtasks):
         cursor.execute("INSERT INTO tasks (title, status, priority, user_id, assigned_to) VALUES (?, 'BACKLOG', 'HIGH', ?, ?)", 
-                       (title, req.userId, req.assignedTo))
+                       (title, req.userId, assignees[index % len(assignees)]))
     conn.commit()
     conn.close()
     

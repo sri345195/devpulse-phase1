@@ -10,8 +10,18 @@ const COLUMNS = [
   { id: "DONE", label: "Completed", color: "#16a34a", bg: "#f0fdf4" }
 ];
 
+function getErrorMessage(detail, fallback) {
+  if (typeof detail === "string") return detail;
+  if (Array.isArray(detail)) {
+    return detail
+      .map((item) => (typeof item === "string" ? item : item?.msg || JSON.stringify(item)))
+      .join("; ");
+  }
+  return fallback;
+}
+
 export default function App() {
-  const [user, setUser] = useState(() => JSON.parse(localStorage.getItem("devpulse_user") || "null"));
+  const [user, setUser] = useState(null);
   const [isRegistering, setIsRegistering] = useState(false);
   const [activeTab, setActiveTab] = useState("kanban"); // "kanban" | "analytics" | "settings"
 
@@ -84,11 +94,10 @@ export default function App() {
       });
       const data = await res.json();
       if (!res.ok) {
-        alert(data.detail || "Login failed.");
+        alert(getErrorMessage(data.detail, "Login failed."));
         return;
       }
       setUser(data);
-      localStorage.setItem("devpulse_user", JSON.stringify(data));
     } catch (err) {
       alert("Backend server is waking up or offline. Please wait 30 seconds and try again.");
     }
@@ -104,11 +113,10 @@ export default function App() {
       });
       const data = await res.json();
       if (!res.ok) {
-        alert(data.detail || "Registration failed.");
+        alert(getErrorMessage(data.detail, "Registration failed."));
         return;
       }
       setUser(data);
-      localStorage.setItem("devpulse_user", JSON.stringify(data));
     } catch (err) {
       alert("Backend server offline.");
     }
@@ -136,7 +144,7 @@ export default function App() {
     });
     if (!res.ok) {
       const err = await res.json();
-      alert(err.detail);
+      alert(getErrorMessage(err.detail, "Unable to assign task."));
       return;
     }
     setTaskTitle("");
@@ -155,7 +163,7 @@ export default function App() {
       });
       if (!res.ok) {
         const err = await res.json();
-        alert(err.detail || "Unable to assign AI tasks.");
+        alert(getErrorMessage(err.detail, "Unable to assign AI tasks."));
         return;
       }
       setAiPrompt("");
@@ -175,12 +183,12 @@ export default function App() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           ...updates,
-          ...(isManager && (updates.assignedTo || updates.priority) ? { userId: user.userId } : {}),
+          userId: user.userId,
         }),
       });
       if (!res.ok) {
         const err = await res.json();
-        alert(err.detail || "Unable to update task.");
+        alert(getErrorMessage(err.detail, "Unable to update task."));
         return;
       }
       fetchTasks();
@@ -194,7 +202,7 @@ export default function App() {
     const res = await fetch(`${API_BASE}/api/tasks/${id}?userId=${user.userId}`, { method: "DELETE" });
     if (!res.ok) {
       const err = await res.json();
-      alert(err.detail);
+      alert(getErrorMessage(err.detail, "Unable to delete task."));
       return;
     }
     fetchTasks();
@@ -432,7 +440,10 @@ export default function App() {
                     </div>
 
                     <div style={styles.cardContainer}>
-                      {colTasks.map((task) => (
+                      {colTasks.map((task) => {
+                        const taskAssigneeId = task.assignedToId || usersList.find((member) => member.name === task.assignedTo)?.userId;
+                        const canChangeStatus = isManager || taskAssigneeId === user.userId;
+                        return (
                         <div key={task.id} style={styles.card}>
                           <div style={styles.cardHeader}>
                             {isManager ? (
@@ -474,6 +485,8 @@ export default function App() {
                               value={task.status}
                               onChange={(e) => handleUpdateTask(task.id, { status: e.target.value })}
                               style={styles.statusSelect}
+                              disabled={!canChangeStatus}
+                              title={canChangeStatus ? "Update task status" : "You can update only tasks assigned to you"}
                             >
                               {COLUMNS.map((c) => (
                                 <option key={c.id} value={c.id} style={styles.optionItem}>{c.label}</option>
@@ -487,7 +500,8 @@ export default function App() {
                             )}
                           </div>
                         </div>
-                      ))}
+                        );
+                      })}
                     </div>
                   </div>
                 );

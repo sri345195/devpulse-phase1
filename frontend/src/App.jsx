@@ -35,6 +35,7 @@ export default function App() {
   const [usersList, setUsersList] = useState([]);
   const [assignedTo, setAssignedTo] = useState("");
   const [tasks, setTasks] = useState([]);
+  const [taskLoadError, setTaskLoadError] = useState("");
   const [taskTitle, setTaskTitle] = useState("");
   const [taskPriority, setTaskPriority] = useState("MEDIUM");
   const [aiPrompt, setAiPrompt] = useState("");
@@ -44,12 +45,16 @@ export default function App() {
   const fetchTasks = async () => {
     try {
       const res = await fetch(`${API_BASE}/api/tasks`);
-      if (res.ok) {
-        const data = await res.json();
-        setTasks(data);
+      if (!res.ok) {
+        setTaskLoadError(`Unable to load tasks (HTTP ${res.status}).`);
+        return;
       }
+      const data = await res.json();
+      setTasks(data);
+      setTaskLoadError("");
     } catch (err) {
       console.error("Connection error:", err);
+      setTaskLoadError("Unable to reach the backend to load tasks.");
     }
   };
 
@@ -429,6 +434,11 @@ export default function App() {
               </div>
             )}
 
+            {taskLoadError && <div role="alert" style={styles.taskLoadError}>{taskLoadError}</div>}
+            {!taskLoadError && tasks.length === 0 && (
+              <div style={styles.taskEmptyState}>No tasks are saved yet. Add a task or use AI to create tasks.</div>
+            )}
+
             <div style={styles.kanbanGrid}>
               {COLUMNS.map((col) => {
                 const colTasks = tasks.filter((t) => t.status === col.id);
@@ -664,6 +674,8 @@ const styles = {
   prioritySelect: { padding: '0 12px', border: '1px solid #cbd5e1', borderRadius: '8px', fontSize: '13px', backgroundColor: '#ffffff', color: '#0f172a', fontWeight: '500' },
   addBtn: { padding: '10px 20px', backgroundColor: '#2563eb', color: 'white', border: 'none', borderRadius: '8px', fontWeight: 'bold', cursor: 'pointer' },
   memberNotice: { margin: '20px 30px 10px', padding: '12px 16px', backgroundColor: '#f1f5f9', border: '1px solid #cbd5e1', borderRadius: '8px', fontSize: '13px', color: '#475569' },
+  taskLoadError: { margin: '0 30px 10px', padding: '12px 16px', backgroundColor: '#fef2f2', border: '1px solid #fecaca', borderRadius: '8px', color: '#b91c1c', fontSize: '13px' },
+  taskEmptyState: { margin: '0 30px 10px', padding: '12px 16px', backgroundColor: '#ffffff', border: '1px solid #e2e8f0', borderRadius: '8px', color: '#64748b', fontSize: '13px' },
 
   kanbanGrid: { flex: 1, display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '20px', padding: '10px 30px 20px', overflowY: 'auto' },
   column: { borderRadius: '12px', padding: '16px', display: 'flex', flexDirection: 'column' },

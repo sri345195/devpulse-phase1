@@ -287,24 +287,30 @@ export default function App() {
       <aside style={styles.sidebar}>
         <div style={styles.brand}><span style={styles.brandIcon}>⚡</span> DevPulse</div>
         <nav style={{ flex: 1, marginTop: '20px' }}>
-          <div
+          <button
+            type="button"
             onClick={() => setActiveTab("kanban")}
+            aria-current={activeTab === "kanban" ? "page" : undefined}
             style={activeTab === "kanban" ? styles.navItemActive : styles.navItem}
           >
             📋 Kanban Board
-          </div>
-          <div
+          </button>
+          <button
+            type="button"
             onClick={() => setActiveTab("analytics")}
+            aria-current={activeTab === "analytics" ? "page" : undefined}
             style={activeTab === "analytics" ? styles.navItemActive : styles.navItem}
           >
             📊 Analytics
-          </div>
-          <div
+          </button>
+          <button
+            type="button"
             onClick={() => setActiveTab("settings")}
+            aria-current={activeTab === "settings" ? "page" : undefined}
             style={activeTab === "settings" ? styles.navItemActive : styles.navItem}
           >
             ⚙️ Settings
-          </div>
+          </button>
         </nav>
 
         <div style={styles.userProfile}>
@@ -367,9 +373,12 @@ export default function App() {
                     onChange={(e) => setAssignedTo(e.target.value)}
                     style={styles.selectInputInline}
                   >
+                    {usersList.length === 0 && (
+                      <option value="" disabled>No employees available</option>
+                    )}
                     {usersList.map((u) => (
                       <option key={u.userId} value={u.userId} style={styles.optionItem}>
-                        👤 Assign to: {u.name} ({u.role})
+                        {u.name} ({u.role})
                       </option>
                     ))}
                   </select>
@@ -571,8 +580,8 @@ const styles = {
   sidebar: { width: '250px', backgroundColor: '#0f172a', color: 'white', display: 'flex', flexDirection: 'column', padding: '20px' },
   brand: { fontSize: '20px', fontWeight: 'bold', color: '#f8fafc' },
   brandIcon: { color: '#38bdf8' },
-  navItemActive: { padding: '10px 14px', backgroundColor: '#1e293b', color: '#38bdf8', borderRadius: '8px', fontWeight: 'bold', marginBottom: '8px', cursor: 'pointer' },
-  navItem: { padding: '10px 14px', color: '#94a3b8', borderRadius: '8px', marginBottom: '8px', cursor: 'pointer' },
+  navItemActive: { width: '100%', padding: '10px 14px', backgroundColor: '#1e293b', color: '#38bdf8', border: 'none', borderRadius: '8px', font: 'inherit', textAlign: 'left', fontWeight: 'bold', marginBottom: '8px', cursor: 'pointer' },
+  navItem: { width: '100%', padding: '10px 14px', backgroundColor: 'transparent', color: '#94a3b8', border: 'none', borderRadius: '8px', font: 'inherit', textAlign: 'left', marginBottom: '8px', cursor: 'pointer' },
   userProfile: { display: 'flex', alignItems: 'center', gap: '10px', padding: '12px', backgroundColor: '#1e293b', borderRadius: '10px' },
   avatar: { width: '32px', height: '32px', borderRadius: '50%', backgroundColor: '#2563eb', color: 'white', display: 'flex', justifyContent: 'center', alignItems: 'center', fontWeight: 'bold' },
   userName: { fontSize: '13px', fontWeight: 'bold', color: '#f8fafc', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' },

@@ -22,4 +22,10 @@ html, body, #root {
 input, select, option {
   color: #0f172a;
   background-color: #ffffff;
+  color-scheme: light;
+}
+
+input::placeholder {
+  color: #64748b;
+  opacity: 1;
 }

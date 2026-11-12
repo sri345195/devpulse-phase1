@@ -50,7 +50,8 @@ export default function App() {
         const data = await res.json();
         setUsersList(data);
         if (data.length > 0 && !assignedTo) {
-          setAssignedTo(data[0].userId);
+          const firstMember = data.find((candidate) => candidate.role !== "Manager");
+          setAssignedTo((firstMember || data[0]).userId);
         }
       }
     } catch (err) {
@@ -116,6 +117,7 @@ export default function App() {
   const handleLogout = () => {
     setUser(null);
     setActiveTab("kanban");
+    setAssignedTo("");
     localStorage.removeItem("devpulse_user");
   };
 
@@ -145,32 +147,47 @@ export default function App() {
     e.preventDefault();
     if (!aiPrompt.trim()) return;
     setLoadingAi(true);
-    const res = await fetch(`${API_BASE}/api/tasks/ai-breakdown`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        prompt: aiPrompt,
-        userId: user.userId,
-        assignedTo: assignedTo || user.userId
-      }),
-    });
-    setLoadingAi(false);
-    if (!res.ok) {
-      const err = await res.json();
-      alert(err.detail);
-      return;
+    try {
+      const res = await fetch(`${API_BASE}/api/tasks/ai-breakdown`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ prompt: aiPrompt, userId: user.userId }),
+      });
+      if (!res.ok) {
+        const err = await res.json();
+        alert(err.detail || "Unable to assign AI tasks.");
+        return;
+      }
+      setAiPrompt("");
+      fetchTasks();
+    } catch (err) {
+      console.error("AI task assignment failed:", err);
+      alert("Unable to reach the backend to assign AI tasks.");
+    } finally {
+      setLoadingAi(false);
     }
-    setAiPrompt("");
-    fetchTasks();
   };
 
-  const handleUpdateStatus = async (id, newStatus) => {
-    await fetch(`${API_BASE}/api/tasks/${id}`, {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ status: newStatus }),
-    });
-    fetchTasks();
+  const handleUpdateTask = async (id, updates) => {
+    try {
+      const res = await fetch(`${API_BASE}/api/tasks/${id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          ...updates,
+          ...(isManager && (updates.assignedTo || updates.priority) ? { userId: user.userId } : {}),
+        }),
+      });
+      if (!res.ok) {
+        const err = await res.json();
+        alert(err.detail || "Unable to update task.");
+        return;
+      }
+      fetchTasks();
+    } catch (err) {
+      console.error("Task update failed:", err);
+      alert("Unable to reach the backend to update this task.");
+    }
   };
 
   const handleDeleteTask = async (id) => {
@@ -319,7 +336,9 @@ export default function App() {
             <div style={styles.userName}>{user.name}</div>
             <div style={styles.userRole}>{user.role} ({user.userId})</div>
           </div>
-          <button onClick={handleLogout} style={styles.logoutBtn} title="Logout">🚪</button>
+          <button onClick={handleLogout} style={styles.logoutBtn} title="Sign Out" aria-label="Sign Out">
+            🚪 <span>Sign Out</span>
+          </button>
         </div>
       </aside>
 
@@ -416,15 +435,44 @@ export default function App() {
                       {colTasks.map((task) => (
                         <div key={task.id} style={styles.card}>
                           <div style={styles.cardHeader}>
-                            <span style={getPriorityStyle(task.priority)}>{task.priority}</span>
-                            <span style={styles.cardUser}>👤 {task.assignedTo}</span>
+                            {isManager ? (
+                              <>
+                                <select
+                                  aria-label={`Priority for ${task.title}`}
+                                  value={task.priority}
+                                  onChange={(e) => handleUpdateTask(task.id, { priority: e.target.value })}
+                                  style={styles.cardPrioritySelect}
+                                >
+                                  <option value="LOW">Low</option>
+                                  <option value="MEDIUM">Medium</option>
+                                  <option value="HIGH">High</option>
+                                </select>
+                                <select
+                                  aria-label={`Assignee for ${task.title}`}
+                                  value={task.assignedToId || usersList.find((member) => member.name === task.assignedTo)?.userId || ""}
+                                  onChange={(e) => handleUpdateTask(task.id, { assignedTo: e.target.value })}
+                                  style={styles.cardAssigneeSelect}
+                                  disabled={usersList.length === 0}
+                                >
+                                  {usersList.length === 0 && <option value="">No employees available</option>}
+                                  {usersList.map((member) => (
+                                    <option key={member.userId} value={member.userId}>{member.name}</option>
+                                  ))}
+                                </select>
+                              </>
+                            ) : (
+                              <>
+                                <span style={getPriorityStyle(task.priority)}>{task.priority}</span>
+                                <span style={styles.cardUser}>👤 {task.assignedTo}</span>
+                              </>
+                            )}
                           </div>
                           <p style={styles.cardTitle}>{task.title}</p>
 
                           <div style={styles.cardFooter}>
                             <select
                               value={task.status}
-                              onChange={(e) => handleUpdateStatus(task.id, e.target.value)}
+                              onChange={(e) => handleUpdateTask(task.id, { status: e.target.value })}
                               style={styles.statusSelect}
                             >
                               {COLUMNS.map((c) => (
@@ -586,7 +634,7 @@ const styles = {
   avatar: { width: '32px', height: '32px', borderRadius: '50%', backgroundColor: '#2563eb', color: 'white', display: 'flex', justifyContent: 'center', alignItems: 'center', fontWeight: 'bold' },
   userName: { fontSize: '13px', fontWeight: 'bold', color: '#f8fafc', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' },
   userRole: { fontSize: '11px', color: '#94a3b8' },
-  logoutBtn: { background: 'none', border: 'none', cursor: 'pointer', fontSize: '16px' },
+  logoutBtn: { display: 'flex', alignItems: 'center', gap: '4px', background: 'none', border: 'none', color: '#f8fafc', whiteSpace: 'nowrap', cursor: 'pointer', fontSize: '11px', fontWeight: '600' },
 
   mainContent: { flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' },
   header: { height: '65px', borderBottom: '1px solid #e2e8f0', backgroundColor: 'white', display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0 30px' },
@@ -610,7 +658,9 @@ const styles = {
   badge: { backgroundColor: '#ffffff', padding: '2px 8px', borderRadius: '10px', fontSize: '12px', fontWeight: 'bold', color: '#64748b' },
   cardContainer: { flex: 1, display: 'flex', flexDirection: 'column', gap: '10px', overflowY: 'auto' },
   card: { backgroundColor: 'white', padding: '14px', borderRadius: '10px', boxShadow: '0 1px 3px rgba(0,0,0,0.05)', border: '1px solid #e2e8f0' },
-  cardHeader: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' },
+  cardHeader: { display: 'flex', gap: '6px', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' },
+  cardPrioritySelect: { flex: '0 0 76px', minWidth: 0, padding: '3px 4px', border: '1px solid #cbd5e1', borderRadius: '5px', fontSize: '10px', backgroundColor: '#ffffff', color: '#0f172a' },
+  cardAssigneeSelect: { flex: '1 1 0', minWidth: 0, padding: '3px 4px', border: '1px solid #cbd5e1', borderRadius: '5px', fontSize: '10px', backgroundColor: '#ffffff', color: '#0f172a' },
   cardUser: { fontSize: '11px', color: '#64748b', fontWeight: 'bold' },
   cardTitle: { margin: '0 0 12px', fontSize: '14px', color: '#1e293b', lineHeight: '1.4' },
   cardFooter: { display: 'flex', justifyContent: 'space-between', alignItems: 'center' },

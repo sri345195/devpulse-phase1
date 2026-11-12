@@ -9,6 +9,13 @@ from typing import List, Literal, Optional
 from openai import OpenAI
 
 app = FastAPI()
+DATABASE_PATH = os.path.abspath(
+    os.getenv("DATABASE_PATH", os.path.join(os.path.dirname(__file__), "tasks.db"))
+)
+
+def connect_db():
+    os.makedirs(os.path.dirname(DATABASE_PATH), exist_ok=True)
+    return sqlite3.connect(DATABASE_PATH)
 
 app.add_middleware(
     CORSMiddleware,
@@ -46,7 +53,7 @@ def hash_password(password: str) -> str:
     return hashlib.sha256(password.encode()).hexdigest()
 
 def init_db():
-    conn = sqlite3.connect("tasks.db")
+    conn = connect_db()
     cursor = conn.cursor()
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS users (
@@ -81,7 +88,7 @@ def init_db():
 init_db()
 
 def get_user_role(user_id: str) -> str:
-    conn = sqlite3.connect("tasks.db")
+    conn = connect_db()
     cursor = conn.cursor()
     cursor.execute("SELECT role FROM users WHERE user_id = ?", (user_id,))
     row = cursor.fetchone()
@@ -122,7 +129,7 @@ class AIBreakdownRequest(BaseModel):
 
 @app.get("/api/users")
 def get_users():
-    conn = sqlite3.connect("tasks.db")
+    conn = connect_db()
     cursor = conn.cursor()
     cursor.execute("SELECT user_id, name, role, email FROM users")
     rows = cursor.fetchall()
@@ -131,7 +138,7 @@ def get_users():
 
 @app.post("/api/auth/register")
 def register(req: RegisterRequest):
-    conn = sqlite3.connect("tasks.db")
+    conn = connect_db()
     cursor = conn.cursor()
     cursor.execute("SELECT email FROM users WHERE email = ?", (req.email.strip().lower(),))
     if cursor.fetchone():
@@ -151,7 +158,7 @@ def register(req: RegisterRequest):
 
 @app.post("/api/auth/login")
 def login(req: LoginRequest):
-    conn = sqlite3.connect("tasks.db")
+    conn = connect_db()
     cursor = conn.cursor()
     hashed_pwd = hash_password(req.password)
     
@@ -167,7 +174,7 @@ def login(req: LoginRequest):
 
 @app.get("/api/tasks")
 def get_tasks():
-    conn = sqlite3.connect("tasks.db")
+    conn = connect_db()
     cursor = conn.cursor()
     cursor.execute("""
         SELECT t.id, t.title, t.status, t.priority, t.user_id, t.assigned_to,
@@ -190,7 +197,7 @@ def get_tasks():
 @app.post("/api/tasks")
 async def create_task(task: TaskCreate):
     check_is_manager(task.userId)
-    conn = sqlite3.connect("tasks.db")
+    conn = connect_db()
     cursor = conn.cursor()
     cursor.execute("INSERT INTO tasks (title, status, priority, user_id, assigned_to) VALUES (?, 'BACKLOG', ?, ?, ?)", 
                    (task.title, task.priority, task.userId, task.assignedTo))
@@ -218,7 +225,7 @@ async def update_task(task_id: int, task: TaskUpdate):
     if (task.priority is not None or task.assignedTo is not None) and actor_role != "Manager":
         raise HTTPException(status_code=403, detail="Only Managers can change task priority or assignee.")
 
-    conn = sqlite3.connect("tasks.db")
+    conn = connect_db()
     cursor = conn.cursor()
     cursor.execute("SELECT assigned_to FROM tasks WHERE id = ?", (task_id,))
     task_row = cursor.fetchone()
@@ -256,7 +263,7 @@ async def update_task(task_id: int, task: TaskUpdate):
 @app.delete("/api/tasks/{task_id}")
 async def delete_task(task_id: int, userId: str):
     check_is_manager(userId)
-    conn = sqlite3.connect("tasks.db")
+    conn = connect_db()
     cursor = conn.cursor()
     cursor.execute("DELETE FROM tasks WHERE id = ?", (task_id,))
     conn.commit()
@@ -292,7 +299,7 @@ async def ai_breakdown(req: AIBreakdownRequest):
             f"Frontend UI implementation for: {req.prompt}"
         ]
 
-    conn = sqlite3.connect("tasks.db")
+    conn = connect_db()
     cursor = conn.cursor()
     cursor.execute("SELECT user_id FROM users WHERE role != 'Manager' ORDER BY user_id")
     assignees = [row[0] for row in cursor.fetchall()]
